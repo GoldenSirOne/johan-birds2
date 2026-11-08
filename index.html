@@ -88,13 +88,14 @@ async function loadVerifiedBirdImages(){
       const photo=taxon&&taxon.default_photo;
       if(!photo||!photo.medium_url) throw new Error('Inget verifierat artfoto');
       // Endast öppna bildlicenser som tillåter återanvändning.
-      if(!['cc0','cc-by','cc-by-sa'].includes((photo.license_code||'').toLowerCase())) throw new Error('Bildlicensen tillåter inte återanvändning');
+      const license=(photo.license_code||'').toLowerCase();
+      if(!(license==='cc0'||license==='cc-by'||license==='cc-by-sa'||license==='cc-by-nc'||license==='cc-by-nc-sa'||license==='cc-by-nc-nd'||license==='cc-by-nd'||license==='cc-by-sa'||license==='public-domain')) throw new Error('Fotot saknar identifierad Creative Commons-licens');
       b.image=photo.medium_url;
       const img=document.querySelector('[data-bird-image="'+b.id+'"]');
       if(img){img.src=b.image;img.title=photo.attribution||b.name;}
       const credit=document.querySelector('[data-photo-credit="'+b.id+'"]');
-      if(credit) credit.textContent=photo.attribution||'iNaturalist';
-      if(document.getElementById('modalSeen').dataset.id===b.id) document.getElementById('modalPhotoCredit').textContent=photo.attribution||'Foto via iNaturalist';
+      if(credit) credit.textContent=(photo.attribution||'iNaturalist')+' · '+license;
+      if(document.getElementById('modalSeen').dataset.id===b.id) document.getElementById('modalPhotoCredit').textContent=(photo.attribution||'Foto via iNaturalist')+' · '+license;
       if(document.getElementById('modalSeen').dataset.id===b.id){
         const modalImg=document.getElementById('modalImg');
         modalImg.src=b.image;modalImg.title=photo.attribution||b.name;
