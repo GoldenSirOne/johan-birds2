@@ -93,7 +93,7 @@ async function handleBirdImageError(img){
   }
   birdImageCache.set(id,'');
   try{
-    const api='https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=12&gsrsearch='+encodeURIComponent('"'+bird.latin+'"')+'&prop=imageinfo&iiprop=url&iiurlwidth=1100';
+    const api='https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=12&gsrsearch='+encodeURIComponent('"'+bird.latin+'"')+'&prop=imageinfo&iiprop=url%7Cextmetadata&iiurlwidth=1100';
     const response=await fetch(api);
     if(!response.ok)throw new Error('Commons request failed');
     const data=await response.json();
@@ -101,7 +101,8 @@ async function handleBirdImageError(img){
     const terms=bird.latin.toLowerCase().split(/\\s+/);
     const exact=pages.find(page=>{
       const title=(page.title||'').toLowerCase();
-      return terms.every(term=>title.includes(term));
+      const description=(page.imageinfo?.[0]?.extmetadata?.ImageDescription?.value||'').replace(/<[^>]*>/g,' ').toLowerCase();
+      return terms.every(term=>title.includes(term)||description.includes(term));
     });
     const url=exact?.imageinfo?.[0]?.thumburl||exact?.imageinfo?.[0]?.url||'';
     if(!url)throw new Error('No exact species image found');
