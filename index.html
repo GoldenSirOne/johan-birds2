@@ -72,66 +72,60 @@ let seen=new Set(JSON.parse(localStorage.getItem('fagelstigen-seen')||'[]'));
 function updateSeen(){document.getElementById('seenCount').textContent=seen.size+' av '+birds.length+' fåglar sedda';document.getElementById('progressBar').style.width=(seen.size/birds.length*100)+'%';document.getElementById('seenList').innerHTML=birds.map(b=>'<label class="seen-item '+(seen.has(b.id)?'checked':'')+'"><input type="checkbox" data-seen="'+b.id+'" '+(seen.has(b.id)?'checked':'')+'>'+b.name+'</label>').join('');localStorage.setItem('fagelstigen-seen',JSON.stringify([...seen]));}
 const grid=document.getElementById('birdGrid');
 function render(){const q=document.getElementById('search').value.trim().toLocaleLowerCase('sv');const list=birds.filter(b=>(active==='Alla'||b.group===active)&&[b.name,b.latin,b.group,b.desc,b.habitat,b.food].join(' ').toLocaleLowerCase('sv').includes(q));grid.innerHTML=list.length?list.map(b=>`<article class="bird-card" tabindex="0" role="button" aria-label="Läs mer om ${b.name}" data-id="${b.id}"><div class="bird-img"><img data-bird-image="${b.id}" src="assets/bird-placeholder.svg" alt="${b.alt}" loading="lazy"><span class="tag">${b.group}</span><small class="photo-credit" data-photo-credit="${b.id}"></small></div><div class="bird-content"><div class="bird-title"><div><h3>${b.name}</h3><div class="latin">${b.latin}</div></div><span class="card-arrow">↗</span></div><p>${b.desc.slice(0,105)}…</p><div class="facts"><div class="fact">Längd<b>${b.size}</b></div><div class="fact">Favoritmat<b>${b.food}</b></div></div></div></article>`).join(''):'<div class="empty">Inga fåglar hittades. Prova ett annat sökord eller filter.</div>'}
+loadVerifiedBirdImages();
 document.getElementById('filters').addEventListener('click',e=>{const btn=e.target.closest('button[data-filter]');if(!btn)return;active=btn.dataset.filter;document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===btn));render()});
 document.getElementById('search').addEventListener('input',render);
 
 // Hämta foton från iNaturalist och godkänn bara exakt vetenskapligt artnamn.
 // Det hindrar att en sökträff på en liknande art visas som fel fågel.
+const birdImageCache=new Map();
+async function findApprovedBirdPhoto(b){
+  if(birdImageCache.has(b.id)) return birdImageCache.get(b.id);
+  const query='filetype:bitmap "'+b.latin+'"';
+  const api='https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrsearch='+encodeURIComponent(query)+'&gsrlimit=30&prop=imageinfo&iiprop=url|size|extmetadata&iiurlwidth=1400';
+  const response=await fetch(api);
+  if(!response.ok) throw new Error('Wikimedia Commons unavailable');
+  const data=await response.json();
+  const pages=Object.values(data.query?.pages||{});
+  const approved=pages.map(p=>{
+    const info=p.imageinfo?.[0], meta=info?.extmetadata||{};
+    const license=(meta.LicenseShortName?.value||'').replace(/<[^>]*>/g,'').trim();
+    const description=(meta.ImageDescription?.value||'').replace(/<[^>]*>/g,' ').toLowerCase();
+    const title=(p.title||'').toLowerCase();
+    const latin=b.latin.toLowerCase();
+    const speciesMatch=title.includes(latin)||description.includes(latin);
+    const licenseOK=/^(CC0|CC BY|CC BY-SA|Public domain)/i.test(license);
+    if(!info||!speciesMatch||!licenseOK||info.width<1600||info.height<1000) return null;
+    const artist=(meta.Artist?.value||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+    return {url:info.thumburl||info.url,credit:artist||'Wikimedia Commons-bidragsgivare',license,page:p.title};
+  }).filter(Boolean);
+  const result=approved[0]||null;
+  birdImageCache.set(b.id,result);
+  return result;
+}
 async function loadVerifiedBirdImages(){
-  const allowed=new Set(['cc0','cc-by','cc-by-sa','cc-by-nc','cc-by-nc-sa','cc-by-nc-nd','cc-by-nd','public-domain']);
   await Promise.all(birds.map(async b=>{
+    const img=document.querySelector('[data-bird-image="'+b.id+'"]');
+    const credit=document.querySelector('[data-photo-credit="'+b.id+'"]');
+    if(!img) return;
     try{
-      const taxonResponse=await fetch('https://api.inaturalist.org/v1/taxa?q='+encodeURIComponent(b.latin)+'&rank=species&per_page=10');
-      if(!taxonResponse.ok) throw new Error('Taxon lookup failed');
-      const taxa=await taxonResponse.json();
-      const taxon=(taxa.results||[]).find(t=>(t.name||'').toLowerCase()===b.latin.toLowerCase());
-      if(!taxon) throw new Error('Exact species not found');
-      const obsUrl='https://api.inaturalist.org/v1/observations?taxon_id='+taxon.id+'&photos=true&quality_grade=research&photo_license=cc0,cc-by,cc-by-sa,cc-by-nc,cc-by-nc-sa,cc-by-nc-nd,cc-by-nd&per_page=30&order=desc&order_by=observed_on';
-      const obsResponse=await fetch(obsUrl);
-      if(!obsResponse.ok) throw new Error('Observation lookup failed');
-      const observations=await obsResponse.json();
-      let chosen=null;
-      for(const observation of (observations.results||[])){
-        for(const photo of (observation.photos||[])){
-          const license=(photo.license_code||'').toLowerCase();
-          if(allowed.has(license)&&photo.url){
-            chosen={url:photo.url.replace('/square.','/medium.'),credit:photo.attribution||'iNaturalist-fotograf',license};
-            break;
-          }
-        }
-        if(chosen) break;
-      }
-      if(!chosen) throw new Error('No reusable photo for this species');
-      const imgUrl=chosen.url;
-      const img=document.querySelector('[data-bird-image="'+b.id+'"]');
-      if(img){
-        await new Promise((resolve,reject)=>{
-          const test=new Image();
-          test.onload=resolve;
-          test.onerror=reject;
-          test.src=imgUrl;
-        });
-        img.onerror=function(){this.onerror=null;this.src='assets/bird-placeholder.svg';this.closest('.bird-img').querySelector('.photo-credit').textContent='Foto kunde inte laddas';};
-        img.src=imgUrl;
-        img.title=chosen.credit;
-      }
-      b.image=imgUrl;
-      const credit=document.querySelector('[data-photo-credit="'+b.id+'"]');
-      if(credit) credit.textContent=chosen.credit+' · '+chosen.license;
-      if(document.getElementById('modalSeen').dataset.id===b.id){
-        const modalImg=document.getElementById('modalImg');
-        modalImg.src=imgUrl;
-        modalImg.title=chosen.credit;
-        document.getElementById('modalPhotoCredit').textContent=chosen.credit+' · '+chosen.license;
-      }
+      const photo=await findApprovedBirdPhoto(b);
+      if(!photo) throw new Error('No photo meeting quality and identity rules');
+      await new Promise((resolve,reject)=>{
+        const test=new Image();
+        test.onload=resolve;
+        test.onerror=reject;
+        test.src=photo.url;
+      });
+      b.image=photo.url;
+      img.onerror=function(){this.onerror=null;this.src='assets/bird-placeholder.svg';};
+      img.src=photo.url;
+      img.title=photo.credit;
+      if(credit) credit.textContent=photo.credit+' · '+photo.license;
     }catch(error){
       b.image='assets/bird-placeholder.svg';
-      const img=document.querySelector('[data-bird-image="'+b.id+'"]');
-      if(img){
-        img.src=b.image;
-        const credit=document.querySelector('[data-photo-credit="'+b.id+'"]');
-        if(credit) credit.textContent='Foto saknas – artbild ej verifierad';
-      }
+      img.src=b.image;
+      if(credit) credit.textContent='Foto inväntar kvalitetsgranskning';
     }
   }));
 }
@@ -139,5 +133,5 @@ function openBird(id){const b=birds.find(x=>x.id===id);if(!b)return;document.get
 document.getElementById('seenList').addEventListener('change',e=>{const id=e.target.dataset.seen;if(!id)return;e.target.checked?seen.add(id):seen.delete(id);updateSeen();render()});document.getElementById('modalSeen').addEventListener('click',e=>{const id=e.currentTarget.dataset.id;seen.has(id)?seen.delete(id):seen.add(id);updateSeen();e.currentTarget.textContent=seen.has(id)?'✓ Du har sett den här fågeln':'＋ Jag har sett den här fågeln'});
 grid.addEventListener('click',e=>{const card=e.target.closest('[data-id]');if(card)openBird(card.dataset.id)});grid.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-id]')){e.preventDefault();openBird(e.target.dataset.id)}});
 function closeModal(){document.getElementById('modal').classList.remove('open');document.body.style.overflow=''}document.getElementById('close').addEventListener('click',closeModal);document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
-render();updateSeen();loadVerifiedBirdImages();
+render();updateSeen();
 </script></body></html>
