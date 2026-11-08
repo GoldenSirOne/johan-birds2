@@ -78,37 +78,64 @@ document.getElementById('search').addEventListener('input',render);
 // Hämta foton från iNaturalist och godkänn bara exakt vetenskapligt artnamn.
 // Det hindrar att en sökträff på en liknande art visas som fel fågel.
 async function loadVerifiedBirdImages(){
+  const allowed=new Set(['cc0','cc-by','cc-by-sa','cc-by-nc','cc-by-nc-sa','cc-by-nc-nd','cc-by-nd','public-domain']);
   await Promise.all(birds.map(async b=>{
     try{
-      const url='https://api.inaturalist.org/v1/taxa?q='+encodeURIComponent(b.latin)+'&rank=species&per_page=10';
-      const response=await fetch(url);
-      if(!response.ok) throw new Error('Taxon-API svarade inte');
-      const data=await response.json();
-      const taxon=(data.results||[]).find(t=>(t.name||'').toLowerCase()===b.latin.toLowerCase());
-      const photo=taxon&&taxon.default_photo;
-      if(!photo||!photo.medium_url) throw new Error('Inget verifierat artfoto');
-      // Endast öppna bildlicenser som tillåter återanvändning.
-      const license=(photo.license_code||'').toLowerCase();
-      if(!(license==='cc0'||license==='cc-by'||license==='cc-by-sa'||license==='cc-by-nc'||license==='cc-by-nc-sa'||license==='cc-by-nc-nd'||license==='cc-by-nd'||license==='cc-by-sa'||license==='public-domain')) throw new Error('Fotot saknar identifierad Creative Commons-licens');
-      b.image=photo.medium_url;
+      const taxonResponse=await fetch('https://api.inaturalist.org/v1/taxa?q='+encodeURIComponent(b.latin)+'&rank=species&per_page=10');
+      if(!taxonResponse.ok) throw new Error('Taxon lookup failed');
+      const taxa=await taxonResponse.json();
+      const taxon=(taxa.results||[]).find(t=>(t.name||'').toLowerCase()===b.latin.toLowerCase());
+      if(!taxon) throw new Error('Exact species not found');
+      const obsUrl='https://api.inaturalist.org/v1/observations?taxon_id='+taxon.id+'&photos=true&quality_grade=research&photo_license=cc0,cc-by,cc-by-sa,cc-by-nc,cc-by-nc-sa,cc-by-nc-nd,cc-by-nd&per_page=30&order=desc&order_by=observed_on';
+      const obsResponse=await fetch(obsUrl);
+      if(!obsResponse.ok) throw new Error('Observation lookup failed');
+      const observations=await obsResponse.json();
+      let chosen=null;
+      for(const observation of (observations.results||[])){
+        for(const photo of (observation.photos||[])){
+          const license=(photo.license_code||'').toLowerCase();
+          if(allowed.has(license)&&photo.url){
+            chosen={url:photo.url.replace('/square.','/medium.'),credit:photo.attribution||'iNaturalist-fotograf',license};
+            break;
+          }
+        }
+        if(chosen) break;
+      }
+      if(!chosen) throw new Error('No reusable photo for this species');
+      const imgUrl=chosen.url;
       const img=document.querySelector('[data-bird-image="'+b.id+'"]');
-      if(img){img.src=b.image;img.title=photo.attribution||b.name;}
+      if(img){
+        await new Promise((resolve,reject)=>{
+          const test=new Image();
+          test.onload=resolve;
+          test.onerror=reject;
+          test.src=imgUrl;
+        });
+        img.onerror=function(){this.onerror=null;this.src='assets/bird-placeholder.svg';this.closest('.bird-img').querySelector('.photo-credit').textContent='Foto kunde inte laddas';};
+        img.src=imgUrl;
+        img.title=chosen.credit;
+      }
+      b.image=imgUrl;
       const credit=document.querySelector('[data-photo-credit="'+b.id+'"]');
-      if(credit) credit.textContent=(photo.attribution||'iNaturalist')+' · '+license;
-      if(document.getElementById('modalSeen').dataset.id===b.id) document.getElementById('modalPhotoCredit').textContent=(photo.attribution||'Foto via iNaturalist')+' · '+license;
+      if(credit) credit.textContent=chosen.credit+' · '+chosen.license;
       if(document.getElementById('modalSeen').dataset.id===b.id){
         const modalImg=document.getElementById('modalImg');
-        modalImg.src=b.image;modalImg.title=photo.attribution||b.name;
+        modalImg.src=imgUrl;
+        modalImg.title=chosen.credit;
+        document.getElementById('modalPhotoCredit').textContent=chosen.credit+' · '+chosen.license;
       }
     }catch(error){
-      // Behåll den neutrala fågelillustrationen om ett art- och licenssäkert foto saknas.
       b.image='assets/bird-placeholder.svg';
       const img=document.querySelector('[data-bird-image="'+b.id+'"]');
-      if(img) img.src=b.image;
+      if(img){
+        img.src=b.image;
+        const credit=document.querySelector('[data-photo-credit="'+b.id+'"]');
+        if(credit) credit.textContent='Foto saknas – artbild ej verifierad';
+      }
     }
   }));
 }
-function openBird(id){const b=birds.find(x=>x.id===id);if(!b)return;document.getElementById('modalImg').src=b.image;document.getElementById('modalImg').alt=b.alt;document.getElementById('modalImg').onerror=function(){this.onerror=null;this.src='assets/bird-placeholder.svg'};document.getElementById('modalTitle').textContent=b.name;document.getElementById('modalLatin').textContent=b.latin;document.getElementById('modalPhotoCredit').textContent='';document.getElementById('modalDesc').textContent=b.desc;document.getElementById('modalFacts').innerHTML=[['Storlek',b.size],['Mat',b.food],['Miljö',b.habitat]].map(x=>`<div class="modal-fact">${x[0]}<b>${x[1]}</b></div>`).join('');document.getElementById('guideQuote').textContent=b.quote;document.getElementById('modalSeen').dataset.id=b.id;document.getElementById('modalSeen').textContent=seen.has(b.id)?'✓ Du har sett den här fågeln':'＋ Jag har sett den här fågeln';document.querySelector('.guide-stage').classList.add('pointing');const speech=document.querySelector('.speech');speech.innerHTML='<small>Guiden tipsar om '+b.name+'</small>'+b.quote;speech.classList.remove('active');void speech.offsetWidth;speech.classList.add('active');document.getElementById('modal').classList.add('open');document.body.style.overflow='hidden'}
+function openBird(id){const b=birds.find(x=>x.id===id);if(!b)return;document.getElementById('modalImg').src=b.image;document.getElementById('modalImg').alt=b.alt;document.getElementById('modalPhotoCredit').textContent='';document.getElementById('modalImg').onerror=function(){this.onerror=null;this.src='assets/bird-placeholder.svg'};document.getElementById('modalTitle').textContent=b.name;document.getElementById('modalLatin').textContent=b.latin;document.getElementById('modalPhotoCredit').textContent='';document.getElementById('modalDesc').textContent=b.desc;document.getElementById('modalFacts').innerHTML=[['Storlek',b.size],['Mat',b.food],['Miljö',b.habitat]].map(x=>`<div class="modal-fact">${x[0]}<b>${x[1]}</b></div>`).join('');document.getElementById('guideQuote').textContent=b.quote;document.getElementById('modalSeen').dataset.id=b.id;document.getElementById('modalSeen').textContent=seen.has(b.id)?'✓ Du har sett den här fågeln':'＋ Jag har sett den här fågeln';document.querySelector('.guide-stage').classList.add('pointing');const speech=document.querySelector('.speech');speech.innerHTML='<small>Guiden tipsar om '+b.name+'</small>'+b.quote;speech.classList.remove('active');void speech.offsetWidth;speech.classList.add('active');document.getElementById('modal').classList.add('open');document.body.style.overflow='hidden'}
 document.getElementById('seenList').addEventListener('change',e=>{const id=e.target.dataset.seen;if(!id)return;e.target.checked?seen.add(id):seen.delete(id);updateSeen();render()});document.getElementById('modalSeen').addEventListener('click',e=>{const id=e.currentTarget.dataset.id;seen.has(id)?seen.delete(id):seen.add(id);updateSeen();e.currentTarget.textContent=seen.has(id)?'✓ Du har sett den här fågeln':'＋ Jag har sett den här fågeln'});
 grid.addEventListener('click',e=>{const card=e.target.closest('[data-id]');if(card)openBird(card.dataset.id)});grid.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-id]')){e.preventDefault();openBird(e.target.dataset.id)}});
 function closeModal(){document.getElementById('modal').classList.remove('open');document.body.style.overflow=''}document.getElementById('close').addEventListener('click',closeModal);document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
