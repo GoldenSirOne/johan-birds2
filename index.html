@@ -29,7 +29,7 @@ footer{background:#103b2c;color:#d6e2d6;padding:35px 0}.foot{display:flex;align-
 <div class="bird-tools"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="Sök på fågel, färg eller kännetecken…"></label><div class="chips" id="filters"><button class="chip active" data-filter="Alla">Alla</button><button class="chip" data-filter="Trädgård">Trädgård</button><button class="chip" data-filter="Skog">Skog</button><button class="chip" data-filter="Vatten">Vatten</button><button class="chip" data-filter="Rovfågel">Rovfåglar</button></div></div>
 <div class="bird-grid" id="birdGrid"></div></div></section><section id="samlingen" class="collection"><div class="wrap"><div class="section-head"><div><div class="eyebrow">Din fågeldagbok</div><h2>Fåglar jag har sett</h2></div><p>Kryssa i arterna du mött ute i naturen. Dina val sparas på den här enheten.</p></div><strong id="seenCount">0 fåglar sedda</strong><div class="progress-track"><span id="progressBar"></span></div><div id="seenList" class="seen-list"></div></div></section>
 <section class="guide-band" id="guiden"><div class="wrap guide-row"><img class="guide-avatar" src="assets/guide.jpg" alt="Fågelguiden"><div class="guide-copy"><div class="eyebrow">Möt din följeslagare</div><h2>En nyfiken blick gör hela skillnaden.</h2><p>Jag hjälper dig att upptäcka det där lilla extra – den oväntade färgen på en fjäder, ett märkligt läte eller varför en fågel beter sig precis så där. Vi tar det i lugn takt. Naturen har ingen brådska.</p></div><a class="btn" href="#faglar">Visa mig fåglarna ↗</a></div></section>
-<section class="explore" id="utflykt"><div class="wrap explore-grid"><div class="explore-photo"><img src="https://images.unsplash.com/photo-1473448912268-2022ce9509d8?auto=format&fit=crop&w=1100&q=85" alt="Grön skogsstig i mjukt dagsljus" loading="lazy" onerror="this.onerror=null;this.src='assets/bird-placeholder.svg'"><div class="photo-label">🌿 Nästa äventyr väntar runt hörnet</div></div><div class="explore-copy"><div class="eyebrow">Cykla, stanna, lyssna</div><h2>Naturen är närmare än du tror.</h2><p>Du behöver ingen kikare för att börja. Ta cykeln till en park, följ en stig längs vattnet eller slå dig ner vid en glänta. Stanna upp en stund – ofta är fåglarna redan där.</p><div class="route-list"><div class="route"><span class="route-icon">🚲</span><div><b>Ta den lilla omvägen</b><small>En cykeltur kan bli dagens bästa upptäckt.</small></div></div><div class="route"><span class="route-icon">👂</span><div><b>Lyssna innan du tittar</b><small>Fågelkvitter avslöjar ofta vem som gömmer sig.</small></div></div><div class="route"><span class="route-icon">🌱</span><div><b>Lämna platsen som du fann den</b><small>Visa hänsyn till fåglar, bon och natur.</small></div></div></div></div></div></section>
+<section class="explore" id="utflykt"><div class="wrap explore-grid"><div class="explore-photo"><img src="https://images.unsplash.com/photo-1473448912268-2022ce9509d8?auto=format&fit=crop&w=1100&q=85" alt="Grön skogsstig i mjukt dagsljus" loading="lazy" onerror="handleBirdImageError(this)"><div class="photo-label">🌿 Nästa äventyr väntar runt hörnet</div></div><div class="explore-copy"><div class="eyebrow">Cykla, stanna, lyssna</div><h2>Naturen är närmare än du tror.</h2><p>Du behöver ingen kikare för att börja. Ta cykeln till en park, följ en stig längs vattnet eller slå dig ner vid en glänta. Stanna upp en stund – ofta är fåglarna redan där.</p><div class="route-list"><div class="route"><span class="route-icon">🚲</span><div><b>Ta den lilla omvägen</b><small>En cykeltur kan bli dagens bästa upptäckt.</small></div></div><div class="route"><span class="route-icon">👂</span><div><b>Lyssna innan du tittar</b><small>Fågelkvitter avslöjar ofta vem som gömmer sig.</small></div></div><div class="route"><span class="route-icon">🌱</span><div><b>Lämna platsen som du fann den</b><small>Visa hänsyn till fåglar, bon och natur.</small></div></div></div></div></div></section>
 </main><footer><div class="wrap foot"><div class="brand"><span class="brandmark">♧</span> Fågelstigen</div><p>Byggd för nyfikenhet, natur och små upptäckter. Ta hand om våra vilda grannar.</p><p>© Fågelstigen · En fågel i taget.</p></div></footer>
 <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-box"><button class="close" id="close" aria-label="Stäng">×</button><img class="modal-img" id="modalImg" alt=""><div class="modal-body"><h2 id="modalTitle"></h2><div class="latin" id="modalLatin"></div><small id="modalPhotoCredit" style="display:block;color:#7b887d;font-size:10px;margin-top:5px"></small><p id="modalDesc"></p><div class="modal-facts" id="modalFacts"></div><button class="seen-toggle" id="modalSeen">＋ Jag har sett den här fågeln</button><div class="guide-quote"><img src="assets/guide.jpg" alt=""><div><p id="guideQuote"></p><small>Guidens anteckningsbok</small></div></div></div></div></div>
 <script>
@@ -79,6 +79,39 @@ document.getElementById('search').addEventListener('input',render);
 // Hämta foton från iNaturalist och godkänn bara exakt vetenskapligt artnamn.
 // Det hindrar att en sökträff på en liknande art visas som fel fågel.
 const birdImageCache=new Map();
+
+// Om en förvald bild saknas: sök efter en bild för exakt vetenskapligt artnamn
+// på Wikimedia Commons. Visa aldrig en obekräftad bild av en annan art.
+async function handleBirdImageError(img){
+  const id=img.dataset.birdImage;
+  const bird=birds.find(b=>b.id===id);
+  if(!bird){img.onerror=null;img.src='assets/bird-placeholder.svg';return;}
+  if(birdImageCache.has(id)){
+    const cached=birdImageCache.get(id);
+    if(cached){img.onerror=null;img.src=cached;return;}
+    img.onerror=null;img.src='assets/bird-placeholder.svg';return;
+  }
+  birdImageCache.set(id,'');
+  try{
+    const api='https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=12&gsrsearch='+encodeURIComponent('"'+bird.latin+'"')+'&prop=imageinfo&iiprop=url&iiurlwidth=1100';
+    const response=await fetch(api);
+    if(!response.ok)throw new Error('Commons request failed');
+    const data=await response.json();
+    const pages=Object.values(data.query?.pages||{});
+    const terms=bird.latin.toLowerCase().split(/\\s+/);
+    const exact=pages.find(page=>{
+      const title=(page.title||'').toLowerCase();
+      return terms.every(term=>title.includes(term));
+    });
+    const url=exact?.imageinfo?.[0]?.thumburl||exact?.imageinfo?.[0]?.url||'';
+    if(!url)throw new Error('No exact species image found');
+    birdImageCache.set(id,url);
+    img.onerror=null;img.src=url;
+  }catch(error){
+    birdImageCache.set(id,'');
+    img.onerror=null;img.src='assets/bird-placeholder.svg';
+  }
+}
 
 function openBird(id){const b=birds.find(x=>x.id===id);if(!b)return;document.getElementById('modalImg').src=b.image;document.getElementById('modalImg').alt=b.alt;document.getElementById('modalPhotoCredit').textContent='';document.getElementById('modalImg').onerror=function(){this.onerror=null;this.src='assets/bird-placeholder.svg'};document.getElementById('modalTitle').textContent=b.name;document.getElementById('modalLatin').textContent=b.latin;document.getElementById('modalPhotoCredit').textContent='';document.getElementById('modalDesc').textContent=b.desc;document.getElementById('modalFacts').innerHTML=[['Storlek',b.size],['Mat',b.food],['Miljö',b.habitat]].map(x=>`<div class="modal-fact">${x[0]}<b>${x[1]}</b></div>`).join('');document.getElementById('guideQuote').textContent=b.quote;document.getElementById('modalSeen').dataset.id=b.id;document.getElementById('modalSeen').textContent=seen.has(b.id)?'✓ Du har sett den här fågeln':'＋ Jag har sett den här fågeln';document.querySelector('.guide-stage').classList.add('pointing');const speech=document.querySelector('.speech');speech.innerHTML='<small>Guiden tipsar om '+b.name+'</small>'+b.quote;speech.classList.remove('active');void speech.offsetWidth;speech.classList.add('active');document.getElementById('modal').classList.add('open');document.body.style.overflow='hidden'}
 document.getElementById('seenList').addEventListener('change',e=>{const id=e.target.dataset.seen;if(!id)return;e.target.checked?seen.add(id):seen.delete(id);updateSeen();render()});document.getElementById('modalSeen').addEventListener('click',e=>{const id=e.currentTarget.dataset.id;seen.has(id)?seen.delete(id):seen.add(id);updateSeen();e.currentTarget.textContent=seen.has(id)?'✓ Du har sett den här fågeln':'＋ Jag har sett den här fågeln'});
